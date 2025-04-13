@@ -1,37 +1,33 @@
-function hablar() {
-    const recognition = new webkitSpeechRecognition() || new SpeechRecognition();
-    recognition.lang = "es-ES";
-    recognition.start();
-  
-    recognition.onresult = function (event) {
-      const texto = event.results[0][0].transcript;
-      document.getElementById("respuesta").innerText = "🎧 Entendido: " + texto;
-      enviarComando(texto);
-    };
-  
-    recognition.onerror = function () {
-      document.getElementById("respuesta").innerText = "❌ Error al escuchar";
-    };
-  }
-  
-  function enviarComando(texto) {
-    fetch("/comando", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texto }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        const respuesta = data.respuesta;
-        document.getElementById("respuesta").innerText = respuesta;
-        decir(respuesta);
-      });
-  }
-  
-  function decir(texto) {
-    const msg = new SpeechSynthesisUtterance();
-    msg.lang = "es-ES";
-    msg.text = texto;
-    speechSynthesis.speak(msg);
-  }
-  
+document.getElementById('escuchar').addEventListener('click', async () => {
+    const resultadoDiv = document.getElementById('resultado');
+    
+    try {
+        resultadoDiv.innerHTML += '<p>🎤 Escuchando...</p>';
+        
+        // 1. Enviar audio al servidor
+        const response = await fetch('/escuchar', { method: 'POST' });
+        const data = await response.json();
+        
+        // 2. Mostrar en pantalla (tanto si hay éxito como si hay error)
+        if (data.status === 'success') {
+            resultadoDiv.innerHTML += `<p><strong>Tú:</strong> ${data.comando}</p>`;
+            resultadoDiv.innerHTML += `<p><strong>Asistente:</strong> ${data.respuesta}</p>`;
+        } else {
+            resultadoDiv.innerHTML += `<p class="error"><strong>Error:</strong> ${data.error}</p>`;
+            resultadoDiv.innerHTML += `<p><strong>Asistente:</strong> ${data.respuesta}</p>`;
+        }
+        
+        // Nota: Ya no necesitamos hacer hablar aquí porque el servidor ya lo hace automáticamente
+        // cuando procesa el comando en ejecutar_comando() o en los manejadores de error
+        
+    } catch (error) {
+        resultadoDiv.innerHTML += `<p class="error">Error: ${error.message}</p>`;
+        
+        // En caso de error de conexión con el servidor, hacemos hablar al asistente
+        await fetch('/hablar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texto: "Hubo un error de conexión. Intenta de nuevo." })
+        });
+    }
+});
