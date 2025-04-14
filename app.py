@@ -3,25 +3,25 @@ import pyttsx3
 import datetime
 import webbrowser
 import os
-import spotipy
+import subprocess
+import platform
+from pytube import YouTube
+from pytube import Search
+from flask_cors import CORS
 from flask import Flask, render_template, request, jsonify
-from spotipy.oauth2 import SpotifyOAuth
 
-# Configurar Spotify
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-    client_id="e2ac6738ea2c417994296daccee7dee4",
-    client_secret="8bd0a76aff5648d4a1e96037149db1e3",
-    redirect_uri="http://localhost:8888/callback",
-    scope="user-read-playback-state,user-modify-playback-state"
-))
+app = Flask(__name__)
 
-# Inicializar motor de voz
-engine = pyttsx3.init()
-engine.setProperty('rate', 150)
+CORS(app)
+# Configurar el cliente de Spotify 
 
 def hablar(texto):
+    engine = pyttsx3.init()  # Reiniciar en cada llamada
+    engine.setProperty('rate', 150)
     engine.say(texto)
     engine.runAndWait()
+    engine.stop()  # Liberar recursos
+    return texto
 
 def escuchar():
     r = sr.Recognizer()
@@ -39,59 +39,159 @@ def escuchar():
     except sr.RequestError:
         hablar("No tengo conexión para procesar tu voz.")
         return ""
+    finally:
+            source.__exit__() 
 
-def controlar_spotify(comando):
+def abrir_spotify():
+    """Abre la aplicación de Spotify según el sistema operativo"""
     try:
-        if "pausa" in comando:
-            sp.pause_playback()
-            hablar("Spotify pausado")
-        elif "reproduce" in comando:
-            sp.start_playback()
-            hablar("Reproduciendo Spotify")
-        elif "siguiente" in comando:
-            sp.next_track()
-            hablar("Siguiente canción")
-        elif "anterior" in comando:
-            sp.previous_track()
-            hablar("Canción anterior")
+        sistema = platform.system()
+        if sistema == "Windows":
+            os.startfile("spotify")
+            return True
+        elif sistema == "Darwin":  # macOS
+            subprocess.Popen(["open", "-a", "Spotify"])
+            return True
+        elif sistema == "Linux":
+            subprocess.Popen(["spotify"])
+            return True
         else:
-            hablar("Comando de Spotify no reconocido")
-    except:
-        hablar("No pude conectar con Spotify")
+            return False
+    except Exception as e:
+        print(f"Error al abrir Spotify: {str(e)}")
+        return False
+
+def reproducir_youtube(comando):
+    try:
+        # Comando específico: "youtube [búsqueda]"
+        busqueda = comando.replace("youtube", "").strip()
+        print(f"Buscando en YouTube: '{busqueda}'")
+        
+        # Busca en YouTube
+        s = Search(busqueda)
+        if not s.results or len(s.results) == 0:
+            return "No encontré resultados en YouTube para esa búsqueda"
+            
+        video_url = f"https://youtube.com/watch?v={s.results[0].video_id}"
+        
+        # Abre el video en el navegador
+        webbrowser.open(video_url)
+        return f"Reproduciendo en YouTube: {s.results[0].title}"
+    
+    except Exception as e:
+        print(f"Error con YouTube: {str(e)}")
+        return f"No pude encontrar el video en YouTube: {str(e)}"
 
 def ejecutar_comando(comando):
+    if not comando:
+        respuesta = "No escuché nada. ¿Puedes repetirlo?"
+        hablar(respuesta)
+        return respuesta
+    
+    comando = comando.lower().strip()
+    
+    # Comando para decir la hora
     if "hora" in comando:
         hora = datetime.datetime.now().strftime("%H:%M")
-        hablar(f"La hora actual es {hora}")
+        respuesta = "La hora actual es " + hora
+        hablar(respuesta)
+        return respuesta
+    
+    elif "abre spotify" in comando:
+        if abrir_spotify():
+            respuesta = "Abriendo Spotify"
+        else:
+            respuesta = "No pude abrir Spotify"
+        hablar(respuesta)
+        return respuesta
+
+    # Comandos específicos de YouTube
+    elif "youtube" in comando:
+        respuesta = reproducir_youtube(comando)
+        hablar(respuesta)
+        return respuesta
+    
     elif "abre google" in comando:
         webbrowser.open("https://www.google.com")
-        hablar("Abriendo Google")
+        respuesta = "Abriendo Google en tu navegador"
+        hablar(respuesta)
+        return respuesta
+    
     elif "cómo estás" in comando:
-        hablar("Estoy muy bien, gracias por preguntar")
-    elif "reproduce música" in comando:
-        path = "C:\\Tu\\Ruta\\a\\Musica"  # Cambia por tu carpeta de música
-        canciones = os.listdir(path)
-        if canciones:
-            os.startfile(os.path.join(path, canciones[0]))
-            hablar("Reproduciendo música")
-        else:
-            hablar("No encontré canciones")
-    elif "abre spotify" in comando:
-        ruta_spotify = "C:\\Users\\TuUsuario\\AppData\\Roaming\\Spotify\\Spotify.exe"
-        os.startfile(ruta_spotify)
-        hablar("Abriendo Spotify")
-    elif "spotify" in comando:
-        controlar_spotify(comando)
+        respuesta = "Estoy muy bien, gracias por preguntar"
+        hablar(respuesta)
+        return respuesta
+    
     elif "salir" in comando:
-        hablar("Hasta luego")
+        respuesta = "Hasta luego"
+        hablar(respuesta)
+        return respuesta
         exit()
+    
+    # Comandos adicionales se pueden agregar aquí
+    
     else:
-        hablar("No entendí ese comando")
+        respuesta = "No entendí. Por favor di 'youtube' para videos o 'abre spotify' para iniciar la aplicación."
+        hablar(respuesta)
+        return respuesta
 
-# Loop principal
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/escuchar', methods=['POST'])
+def escuchar_comando():
+    r = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            print("Escuchando...")
+            r.adjust_for_ambient_noise(source)
+            audio = r.listen(source, timeout=5, phrase_time_limit=8)
+        
+        try:
+            comando = r.recognize_google(audio, language="es-ES")
+            respuesta = ejecutar_comando(comando)
+            return jsonify({
+                'status': 'success',
+                'comando': comando,
+                'respuesta': respuesta
+            })
+        except sr.UnknownValueError:
+            # Si no se detectó ningún comando
+            respuesta = "No entendí lo que dijiste. ¿Puedes repetirlo?"
+            hablar(respuesta)  # Reproducir mensaje de error por voz
+            return jsonify({
+                'status': 'error',
+                'error': 'No se detectó ningún comando',
+                'comando': '',
+                'respuesta': respuesta
+            })
+        
+    except sr.WaitTimeoutError:
+        respuesta = "Tiempo de espera agotado. Intenta de nuevo."
+        hablar(respuesta)  # Reproducir mensaje de error por voz
+        return jsonify({
+            'status': 'error',
+            'error': 'Tiempo de espera agotado',
+            'comando': '',
+            'respuesta': respuesta
+        })
+    except Exception as e:
+        respuesta = f"Ocurrió un error: {str(e)}"
+        hablar(respuesta)  # Reproducir mensaje de error por voz
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'comando': '',
+            'respuesta': respuesta
+        })
+
+
+@app.route('/hablar', methods=['POST'])
+def hablar_texto():
+    data = request.json
+    texto = data.get('texto', '')
+    respuesta = hablar(texto)
+    return jsonify({'respuesta': respuesta})
 if __name__ == "__main__":
-    hablar("Hola, soy tu asistente. ¿En qué te puedo ayudar?")
-    while True:
-        comando = escuchar()
-        if comando:
-            ejecutar_comando(comando)
+    app.run(debug=True, threaded=True)
