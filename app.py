@@ -3,34 +3,25 @@ import pyttsx3
 import datetime
 import webbrowser
 import os
-import spotipy
 import subprocess
 import platform
-
 from pytube import YouTube
 from pytube import Search
 from flask_cors import CORS
 from flask import Flask, render_template, request, jsonify
-from spotipy.oauth2 import SpotifyOAuth
 
 app = Flask(__name__)
 
 CORS(app)
 # Configurar el cliente de Spotify 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-    client_id="e2ac6738ea2c417994296daccee7dee4",
-    client_secret="8bd0a76aff5648d4a1e96037149db1e3",
-    redirect_uri="http://localhost:8888/callback",
-))
-
-# Inicializar motor de voz
-engine = pyttsx3.init()
-engine.setProperty('rate', 150)
 
 def hablar(texto):
+    engine = pyttsx3.init()  # Reiniciar en cada llamada
+    engine.setProperty('rate', 150)
     engine.say(texto)
     engine.runAndWait()
-    return texto  # Devolvemos el texto para mostrarlo en la web
+    engine.stop()  # Liberar recursos
+    return texto
 
 def escuchar():
     r = sr.Recognizer()
@@ -43,9 +34,13 @@ def escuchar():
         print(f"🗣️ Has dicho: {comando}")
         return comando.lower()
     except sr.UnknownValueError:
-        return "No entendí lo que dijiste."
+        hablar("No entendí lo que dijiste.")
+        return ""
     except sr.RequestError:
-        return "No tengo conexión para procesar tu voz."
+        hablar("No tengo conexión para procesar tu voz.")
+        return ""
+    finally:
+            source.__exit__() 
 
 def abrir_spotify():
     """Abre la aplicación de Spotify según el sistema operativo"""
@@ -65,107 +60,6 @@ def abrir_spotify():
     except Exception as e:
         print(f"Error al abrir Spotify: {str(e)}")
         return False
-
-def buscar_y_reproducir_spotify(comando):
-    try:
-        # Primero intentar abrir Spotify si no está abierto
-        devices = sp.devices()
-        if not devices['devices']:
-            print("No hay dispositivos activos, intentando abrir Spotify...")
-            spotify_abierto = abrir_spotify()
-            if spotify_abierto:
-                # Esperar un momento para que Spotify arranque
-                import time
-                time.sleep(3)
-                # Volver a verificar dispositivos
-                devices = sp.devices()
-                if not devices['devices']:
-                    return "He abierto Spotify pero no detecta dispositivos activos. Intenta de nuevo en unos segundos."
-            else:
-                return "No pude abrir Spotify automáticamente. Por favor, ábrelo manualmente."
-            
-        # Obtener ID del dispositivo activo para usar explícitamente
-        device_id = devices['devices'][0]['id']
-        
-        # Comando: "spotify [canción] de [artista]"
-        if "de" in comando:
-            # Extrae canción y artista
-            partes = comando.split("de")
-            cancion = partes[0].replace("spotify", "").strip()
-            artista = partes[1].strip()
-            print(f"Buscando en Spotify: '{cancion}' de '{artista}'")
-            
-            # Busca en Spotify
-            results = sp.search(q=f"track:{cancion} artist:{artista}", type="track", limit=1)
-            
-            if results['tracks']['items']:
-                track_uri = results['tracks']['items'][0]['uri']
-                sp.start_playback(device_id=device_id, uris=[track_uri])
-                return f"Reproduciendo en Spotify: {cancion} de {artista}"
-            else:
-                # Intentar búsqueda más general
-                results = sp.search(q=f"{cancion} {artista}", type="track", limit=1)
-                if results['tracks']['items']:
-                    track_uri = results['tracks']['items'][0]['uri']
-                    sp.start_playback(device_id=device_id, uris=[track_uri])
-                    track_name = results['tracks']['items'][0]['name']
-                    artist_name = results['tracks']['items'][0]['artists'][0]['name']
-                    return f"Reproduciendo en Spotify: {track_name} de {artist_name}"
-                else:
-                    return f"No encontré {cancion} de {artista} en Spotify"
-        else:
-            # Busca por el nombre de la canción solamente
-            # Comando: "spotify [canción]"
-            query = comando.replace("spotify", "").strip()
-            print(f"Buscando en Spotify: '{query}'")
-            results = sp.search(q=query, type="track", limit=1)
-            
-            if results['tracks']['items']:
-                track_uri = results['tracks']['items'][0]['uri']
-                sp.start_playback(device_id=device_id, uris=[track_uri])
-                track_name = results['tracks']['items'][0]['name']
-                artist_name = results['tracks']['items'][0]['artists'][0]['name']
-                return f"Reproduciendo en Spotify: {track_name} de {artist_name}"
-            else:
-                return f"No encontré {query} en Spotify"
-    except Exception as e:
-        print(f"Error al reproducir en Spotify: {str(e)}")
-        return f"Error al reproducir en Spotify: {str(e)}"
-
-def controlar_spotify(comando):
-    try:
-        devices = sp.devices()
-        if not devices['devices']:
-            print("No hay dispositivos activos, intentando abrir Spotify...")
-            spotify_abierto = abrir_spotify()
-            if spotify_abierto:
-                # Esperar un momento para que Spotify arranque
-                import time
-                time.sleep(3)
-                # Volver a verificar dispositivos
-                devices = sp.devices()
-                if not devices['devices']:
-                    return "He abierto Spotify pero no detecta dispositivos activos. Intenta de nuevo en unos segundos."
-            else:
-                return "No pude abrir Spotify automáticamente. Por favor, ábrelo manualmente."
-            
-        if "pausa" in comando:
-            sp.pause_playback()
-            return "Spotify pausado"
-        elif "continuar" in comando or "reanudar" in comando:
-            sp.start_playback()
-            return "Reanudando Spotify"
-        elif "siguiente" in comando:
-            sp.next_track()
-            return "Pasando a la siguiente canción en Spotify"
-        elif "anterior" in comando:
-            sp.previous_track()
-            return "Volviendo a la canción anterior en Spotify"
-        else:
-            return "Comando de Spotify no reconocido"
-    except Exception as e:
-        print(f"Error con Spotify: {str(e)}")
-        return f"No pude conectar con Spotify: {str(e)}"
 
 def reproducir_youtube(comando):
     try:
@@ -197,9 +91,9 @@ def ejecutar_comando(comando):
     comando = comando.lower().strip()
     
     # Comando para decir la hora
-    if any(palabra in comando for palabra in ["hora", "qué hora es", "dime la hora"]):
-        hora = datetime.datetime.now().strftime("%I:%M %p")  # Formato de 12 horas
-        respuesta = f"Son las {hora}"
+    if "hora" in comando:
+        hora = datetime.datetime.now().strftime("%H:%M")
+        respuesta = "La hora actual es " + hora
         hablar(respuesta)
         return respuesta
     
@@ -210,18 +104,7 @@ def ejecutar_comando(comando):
             respuesta = "No pude abrir Spotify"
         hablar(respuesta)
         return respuesta
-    
-    # Comandos específicos de Spotify
-    elif "spotify" in comando:
-        if any(palabra in comando for palabra in ["pausa", "continuar", "reanudar", "siguiente", "anterior"]):
-            respuesta = controlar_spotify(comando)
-        else:
-            # Para reproducir música: "spotify [canción] de [artista]" o "spotify [canción]"
-            respuesta = buscar_y_reproducir_spotify(comando)
-        
-        hablar(respuesta)
-        return respuesta
-    
+
     # Comandos específicos de YouTube
     elif "youtube" in comando:
         respuesta = reproducir_youtube(comando)
@@ -234,10 +117,21 @@ def ejecutar_comando(comando):
         hablar(respuesta)
         return respuesta
     
+    elif "cómo estás" in comando:
+        respuesta = "Estoy muy bien, gracias por preguntar"
+        hablar(respuesta)
+        return respuesta
+    
+    elif "salir" in comando:
+        respuesta = "Hasta luego"
+        hablar(respuesta)
+        return respuesta
+        exit()
+    
     # Comandos adicionales se pueden agregar aquí
     
     else:
-        respuesta = "No entendí. Por favor di 'spotify' para música en Spotify, 'youtube' para videos o 'abre spotify' para iniciar la aplicación."
+        respuesta = "No entendí. Por favor di 'youtube' para videos o 'abre spotify' para iniciar la aplicación."
         hablar(respuesta)
         return respuesta
 
@@ -252,7 +146,7 @@ def escuchar_comando():
         with sr.Microphone() as source:
             print("Escuchando...")
             r.adjust_for_ambient_noise(source)
-            audio = r.listen(source, timeout=5)
+            audio = r.listen(source, timeout=5, phrase_time_limit=8)
         
         try:
             comando = r.recognize_google(audio, language="es-ES")
@@ -292,12 +186,12 @@ def escuchar_comando():
             'respuesta': respuesta
         })
 
+
 @app.route('/hablar', methods=['POST'])
 def hablar_texto():
     data = request.json
     texto = data.get('texto', '')
     respuesta = hablar(texto)
     return jsonify({'respuesta': respuesta})
-
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, threaded=True)
